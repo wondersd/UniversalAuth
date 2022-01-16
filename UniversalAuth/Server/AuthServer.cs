@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Net;
+using System.Threading;
 
 namespace UniversalAuth.Server
 {
@@ -19,10 +20,16 @@ namespace UniversalAuth.Server
 
         public List<Client> Clients = new List<Client>();
 
+        private ManualResetEvent acceptConnection;
+
+        private bool continueAcceptConnection;
+
         protected AuthServer()
         {
             Socket = null;
             Random = new Random();
+            acceptConnection = new ManualResetEvent(false);
+            continueAcceptConnection = true;
         }
 
         ~AuthServer()
@@ -31,26 +38,35 @@ namespace UniversalAuth.Server
                 Socket.Close();
         }
 
+        // https://docs.microsoft.com/en-us/dotnet/framework/network-programming/using-an-asynchronous-server-socket
         public virtual void Start(IPAddress bindAddress, Int32 port)
         {
             Socket = new LengthedSocket(LengthedSocket.SizeType.Word);
             Socket.Bind(new IPEndPoint(bindAddress, port));
             Socket.Listen(100);
 
-            Socket.BeginAccept(EndAccept);
+            while(continueAcceptConnection) {
+                acceptConnection.Reset();
+
+                Socket.BeginAccept(EndAccept);
+
+                acceptConnection.WaitOne();
+            }
         }
 
         public virtual void Stop()
         {
-            Socket.Close();
-            Socket = null;
+            continueAcceptConnection = false;
+            if (Socket != null) {
+                Socket.Close();
+                Socket = null;
+            }
         }
 
         private void EndAccept(IAsyncResult result)
         {
+            acceptConnection.Set();
             Clients.Add(new Client(Socket.EndAccept(result), this));
-
-            Socket.BeginAccept(EndAccept);
         }
 
         public virtual void Remove(Client client)
